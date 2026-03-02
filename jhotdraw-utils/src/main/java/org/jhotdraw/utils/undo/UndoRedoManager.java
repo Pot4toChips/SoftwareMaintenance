@@ -225,13 +225,7 @@ public class UndoRedoManager extends UndoManager { // javax.swing.undo.UndoManag
    */
   @Override
   public void undo() throws CannotUndoException {
-    undoOrRedoInProgress = true;
-    try {
-      super.undo();
-    } finally {
-      undoOrRedoInProgress = false;
-      updateActions();
-    }
+    runGuarded(() -> super.undo());
   }
 
   /**
@@ -240,13 +234,7 @@ public class UndoRedoManager extends UndoManager { // javax.swing.undo.UndoManag
    */
   @Override
   public void redo() throws CannotUndoException {
-    undoOrRedoInProgress = true;
-    try {
-      super.redo();
-    } finally {
-      undoOrRedoInProgress = false;
-      updateActions();
-    }
+    runGuarded(() -> super.redo());
   }
 
   /**
@@ -255,9 +243,14 @@ public class UndoRedoManager extends UndoManager { // javax.swing.undo.UndoManag
    */
   @Override
   public void undoOrRedo() throws CannotUndoException, CannotRedoException {
+    runGuarded(() -> super.undoOrRedo());
+  }
+
+  /** Runs an undo/redo operation while suppressing incoming edits, then refreshes the actions. */
+  private void runGuarded(Runnable operation) {
     undoOrRedoInProgress = true;
     try {
-      super.undoOrRedo();
+      operation.run();
     } finally {
       undoOrRedoInProgress = false;
       updateActions();
