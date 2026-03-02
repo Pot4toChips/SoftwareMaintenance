@@ -11,6 +11,7 @@ import java.awt.event.ActionEvent;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
 import java.util.Locale;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.AbstractAction;
@@ -189,7 +190,6 @@ public class UndoRedoManager extends UndoManager { // javax.swing.undo.UndoManag
 
   /** Updates the properties of the UndoAction and of the RedoAction. */
   private void updateActions() {
-    String label;
     LOG.fine("UndoRedoManager@"
         + hashCode()
         + ".updateActions "
@@ -198,24 +198,25 @@ public class UndoRedoManager extends UndoManager { // javax.swing.undo.UndoManag
         + canUndo()
         + " canRedo="
         + canRedo());
-    if (canUndo()) {
-      undoAction.setEnabled(true);
-      label = getUndoPresentationName();
+    updateAction(undoAction, canUndo(), this::getUndoPresentationName, "edit.undo.text");
+    updateAction(redoAction, canRedo(), this::getRedoPresentationName, "edit.redo.text");
+  }
+
+  private void updateAction(
+      AbstractAction action,
+      boolean canPerform,
+      Supplier<String> presentationName,
+      String defaultLabelKey) {
+    String label;
+    if (canPerform) {
+      action.setEnabled(true);
+      label = presentationName.get();
     } else {
-      undoAction.setEnabled(false);
-      label = labels.getString("edit.undo.text");
+      action.setEnabled(false);
+      label = labels.getString(defaultLabelKey);
     }
-    undoAction.putValue(Action.NAME, label);
-    undoAction.putValue(Action.SHORT_DESCRIPTION, label);
-    if (canRedo()) {
-      redoAction.setEnabled(true);
-      label = getRedoPresentationName();
-    } else {
-      redoAction.setEnabled(false);
-      label = labels.getString("edit.redo.text");
-    }
-    redoAction.putValue(Action.NAME, label);
-    redoAction.putValue(Action.SHORT_DESCRIPTION, label);
+    action.putValue(Action.NAME, label);
+    action.putValue(Action.SHORT_DESCRIPTION, label);
   }
 
   /**
