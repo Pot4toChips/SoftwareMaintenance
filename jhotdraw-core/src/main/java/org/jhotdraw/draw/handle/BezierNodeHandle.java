@@ -17,7 +17,6 @@ import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.geom.NoninvertibleTransformException;
 import java.awt.geom.Point2D;
-import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -36,6 +35,8 @@ import org.jhotdraw.utils.util.ResourceBundleUtil;
 
 /** A {@link Handle} which allows to interactively change a node of a bezier path. */
 public class BezierNodeHandle extends AbstractHandle implements CoordinateDataSupplier {
+
+  private static final String LABELS_BUNDLE = "org.jhotdraw.draw.Labels";
 
   protected int index;
   private CompositeEdit edit;
@@ -126,7 +127,8 @@ public class BezierNodeHandle extends AbstractHandle implements CoordinateDataSu
   @Override
   public void trackStart(Point anchor, int modifiersEx) {
     BezierFigure figure = getOwner();
-    view.getDrawing().fireUndoableEditHappened(edit = new CompositeEdit("Punkt verschieben"));
+    edit = new CompositeEdit("Punkt verschieben");
+    view.getDrawing().fireUndoableEditHappened(edit);
     oldNode = figure.getNode(index);
     fireHandleRequestSecondaryHandles();
     if (view.getConstrainer() != null
@@ -150,21 +152,9 @@ public class BezierNodeHandle extends AbstractHandle implements CoordinateDataSu
       }
     }
     BezierPath.Node n = figure.getNode(index);
-    // fireAreaInvalidated(n);
     n.moveTo(p);
-    // fireAreaInvalidated(n);
     figure.setNode(index, n);
     figure.changed();
-  }
-
-  private void fireAreaInvalidated(BezierPath.Node v) {
-    Rectangle2D.Double dr = new Rectangle2D.Double(v.x[0], v.y[0], 0, 0);
-    for (int i = 1; i < 3; i++) {
-      dr.add(v.x[i], v.y[i]);
-    }
-    Rectangle vr = view.drawingToView(dr);
-    vr.grow(getHandlesize(), getHandlesize());
-    fireAreaInvalidated(vr);
   }
 
   @Override
@@ -172,25 +162,8 @@ public class BezierNodeHandle extends AbstractHandle implements CoordinateDataSu
     final BezierFigure f = getOwner();
     BezierPath.Node oldValue = (BezierPath.Node) oldNode.clone();
     BezierPath.Node newValue = f.getNode(index);
-    // Change node type
-    if ((modifiersEx
-                & (InputEvent.META_DOWN_MASK
-                    | InputEvent.CTRL_DOWN_MASK
-                    | InputEvent.ALT_DOWN_MASK
-                    | InputEvent.SHIFT_DOWN_MASK))
-            != 0
-        && (modifiersEx & InputEvent.BUTTON2_MASK) == 0) {
-      f.willChange();
-      if (index > 0 && index < f.getNodeCount() || f.isClosed()) {
-        newValue.mask = (newValue.mask + 3) % 4;
-      } else if (index == 0) {
-        newValue.mask = ((newValue.mask & BezierPath.C2_MASK) == 0) ? BezierPath.C2_MASK : 0;
-      } else {
-        newValue.mask = ((newValue.mask & BezierPath.C1_MASK) == 0) ? BezierPath.C1_MASK : 0;
-      }
-      f.setNode(index, newValue);
-      f.changed();
-      fireHandleRequestSecondaryHandles();
+    if (isNodeTypeChangeModifier(modifiersEx)) {
+      applyNodeTypeChange(f, newValue);
     }
     view.getDrawing().fireUndoableEditHappened(new BezierNodeEdit(f, index, oldValue, newValue) {
       private static final long serialVersionUID = 1L;
@@ -216,14 +189,31 @@ public class BezierNodeHandle extends AbstractHandle implements CoordinateDataSu
 
   @Override
   public boolean isCombinableWith(Handle h) {
-    /*
-    if (super.isCombinableWith(h)) {
-    BezierNodeHandle that = (BezierNodeHandle) h;
-    return that.index == this.index &&
-    that.getOwner().getNodeCount() ==
-    this.getOwner().getNodeCount();
-    }*/
     return false;
+  }
+
+  private boolean isNodeTypeChangeModifier(int modifiersEx) {
+    return (modifiersEx
+                & (InputEvent.META_DOWN_MASK
+                    | InputEvent.CTRL_DOWN_MASK
+                    | InputEvent.ALT_DOWN_MASK
+                    | InputEvent.SHIFT_DOWN_MASK))
+            != 0
+        && (modifiersEx & InputEvent.getMaskForButton(2)) == 0;
+  }
+
+  private void applyNodeTypeChange(BezierFigure f, BezierPath.Node newValue) {
+    f.willChange();
+    if (index > 0 && index < f.getNodeCount() || f.isClosed()) {
+      newValue.mask = (newValue.mask + 3) % 4;
+    } else if (index == 0) {
+      newValue.mask = ((newValue.mask & BezierPath.C2_MASK) == 0) ? BezierPath.C2_MASK : 0;
+    } else {
+      newValue.mask = ((newValue.mask & BezierPath.C1_MASK) == 0) ? BezierPath.C1_MASK : 0;
+    }
+    f.setNode(index, newValue);
+    f.changed();
+    fireHandleRequestSecondaryHandles();
   }
 
   @Override
@@ -245,7 +235,7 @@ public class BezierNodeHandle extends AbstractHandle implements CoordinateDataSu
 
         @Override
         public String getPresentationName() {
-          ResourceBundleUtil labels = ResourceBundleUtil.getBundle("org.jhotdraw.draw.Labels");
+          ResourceBundleUtil labels = ResourceBundleUtil.getBundle(LABELS_BUNDLE);
           return labels.getString("edit.bezierPath.joinSegments.text");
         }
 
@@ -283,37 +273,47 @@ public class BezierNodeHandle extends AbstractHandle implements CoordinateDataSu
     if ((v.mask & BezierPath.C2_MASK) != 0 && (index < f.getNodeCount() - 1 || f.isClosed())) {
       list.add(new BezierControlPointHandle(f, index, 2, getTransformOwner()));
     }
+    addPreviousNeighborHandle(f, list);
+    addNextNeighborHandle(f, list);
+    return list;
+  }
+
+  private void addPreviousNeighborHandle(BezierFigure f, Collection<Handle> list) {
     if (index > 0 || f.isClosed()) {
       int i = (index == 0) ? f.getNodeCount() - 1 : index - 1;
-      v = f.getNode(i);
+      BezierPath.Node v = f.getNode(i);
       if ((v.mask & BezierPath.C2_MASK) != 0) {
         list.add(new BezierControlPointHandle(f, i, 2, getTransformOwner()));
       }
     }
+  }
+
+  private void addNextNeighborHandle(BezierFigure f, Collection<Handle> list) {
     if (index < f.getNodeCount() - 1 || f.isClosed()) {
       int i = (index == f.getNodeCount() - 1) ? 0 : index + 1;
-      v = f.getNode(i);
+      BezierPath.Node v = f.getNode(i);
       if ((v.mask & BezierPath.C1_MASK) != 0) {
         list.add(new BezierControlPointHandle(f, i, 1, getTransformOwner()));
       }
     }
-    return list;
   }
 
   @Override
   public String getToolTipText(Point p) {
-    ResourceBundleUtil labels = ResourceBundleUtil.getBundle("org.jhotdraw.draw.Labels");
+    ResourceBundleUtil labels = ResourceBundleUtil.getBundle(LABELS_BUNDLE);
     BezierPath.Node node = getBezierNode();
-    return (node == null)
-        ? null
-        : labels.getFormatted(
-            "handle.bezierNode.toolTipText",
-            labels.getFormatted(
-                (node.getMask() == 0)
-                    ? "handle.bezierNode.linear.value"
-                    : ((node.getMask() == BezierPath.C1C2_MASK)
-                        ? "handle.bezierNode.cubic.value"
-                        : "handle.bezierNode.quadratic.value")));
+    if (node == null) {
+      return null;
+    }
+    String nodeTypeKey;
+    if (node.getMask() == 0) {
+      nodeTypeKey = "handle.bezierNode.linear.value";
+    } else if (node.getMask() == BezierPath.C1C2_MASK) {
+      nodeTypeKey = "handle.bezierNode.cubic.value";
+    } else {
+      nodeTypeKey = "handle.bezierNode.quadratic.value";
+    }
+    return labels.getFormatted("handle.bezierNode.toolTipText", labels.getFormatted(nodeTypeKey));
   }
 
   @Override
@@ -353,8 +353,7 @@ public class BezierNodeHandle extends AbstractHandle implements CoordinateDataSu
             .fireUndoableEditHappened(new BezierNodeEdit(f, index, oldNode, f.getNode(index)));
         evt.consume();
         break;
-      case KeyEvent.VK_DELETE:
-      case KeyEvent.VK_BACK_SPACE:
+      case KeyEvent.VK_DELETE, KeyEvent.VK_BACK_SPACE:
         Rectangle invalidatedArea = getDrawingArea();
         f.willChange();
         final BezierPath.Node removedNode = f.removeNode(index);
@@ -365,7 +364,7 @@ public class BezierNodeHandle extends AbstractHandle implements CoordinateDataSu
 
           @Override
           public String getPresentationName() {
-            ResourceBundleUtil labels = ResourceBundleUtil.getBundle("org.jhotdraw.draw.Labels");
+            ResourceBundleUtil labels = ResourceBundleUtil.getBundle(LABELS_BUNDLE);
             return labels.getString("edit.bezierPath.joinSegments.text");
           }
 
@@ -393,6 +392,8 @@ public class BezierNodeHandle extends AbstractHandle implements CoordinateDataSu
         // At this point, the handle is no longer valid, and
         // handles at higher node indices have become invalid too.
         fireHandleRequestRemove(invalidatedArea);
+        break;
+      default:
         break;
     }
   }

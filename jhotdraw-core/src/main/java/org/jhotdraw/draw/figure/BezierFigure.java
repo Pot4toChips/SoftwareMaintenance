@@ -157,7 +157,7 @@ public class BezierFigure extends AbstractAttributedFigure {
 
   @Override
   protected void drawFill(Graphics2D g) {
-    if (isClosed() || attr().get(UNCLOSED_PATH_FILLED)) {
+    if (isClosed() || Boolean.TRUE.equals(attr().get(UNCLOSED_PATH_FILLED))) {
       double grow = AttributeKeys.getPerpendicularFillGrowth(
           this, AttributeKeys.getScaleFactorFromGraphics(g));
       if (grow == 0d) {
@@ -177,43 +177,48 @@ public class BezierFigure extends AbstractAttributedFigure {
     double tolerance =
         Math.max(1f, 2 * AttributeKeys.getPerpendicularHitGrowth(this, scaleDenominator));
     if (isClosed() || attr().get(FILL_COLOR) != null && attr().get(UNCLOSED_PATH_FILLED)) {
-      if (path.contains(p)) {
+      if (containsInFilledArea(p, tolerance, scaleDenominator)) {
         return true;
       }
-      double grow = tolerance;
-      GrowStroke gs = new GrowStroke(
-          grow,
-          AttributeKeys.getStrokeTotalWidth(this, scaleDenominator)
-              * attr().get(STROKE_MITER_LIMIT));
-      if (gs.createStrokedShape(path).contains(p)) {
-        return true;
-      } else {
-        if (isClosed()) {
-          return false;
-        }
+      if (isClosed()) {
+        return false;
       }
     }
     if (!isClosed()) {
-      if (getCappedPath(scaleDenominator).outlineContains(p, tolerance)) {
+      return containsOnOpenPath(p, tolerance, scaleDenominator);
+    }
+    return false;
+  }
+
+  private boolean containsInFilledArea(
+      Point2D.Double p, double tolerance, double scaleDenominator) {
+    if (path.contains(p)) {
+      return true;
+    }
+    GrowStroke gs = new GrowStroke(
+        tolerance,
+        AttributeKeys.getStrokeTotalWidth(this, scaleDenominator) * attr().get(STROKE_MITER_LIMIT));
+    return gs.createStrokedShape(path).contains(p);
+  }
+
+  private boolean containsOnOpenPath(Point2D.Double p, double tolerance, double scaleDenominator) {
+    if (getCappedPath(scaleDenominator).outlineContains(p, tolerance)) {
+      return true;
+    }
+    if (attr().get(START_DECORATION) != null) {
+      BezierPath cp = getCappedPath(scaleDenominator);
+      Point2D.Double p1 = path.get(0, 0);
+      Point2D.Double p2 = cp.get(0, 0);
+      if (Geom.lineContainsPoint(p1.x, p1.y, p2.x, p2.y, p.x, p.y, tolerance)) {
         return true;
       }
-      if (attr().get(START_DECORATION) != null) {
-        BezierPath cp = getCappedPath(scaleDenominator);
-        Point2D.Double p1 = path.get(0, 0);
-        Point2D.Double p2 = cp.get(0, 0);
-        // FIXME - Check here, if caps path contains the point
-        if (Geom.lineContainsPoint(p1.x, p1.y, p2.x, p2.y, p.x, p.y, tolerance)) {
-          return true;
-        }
-      }
-      if (attr().get(END_DECORATION) != null) {
-        BezierPath cp = getCappedPath(scaleDenominator);
-        Point2D.Double p1 = path.get(path.size() - 1, 0);
-        Point2D.Double p2 = cp.get(path.size() - 1, 0);
-        // FIXME - Check here, if caps path contains the point
-        if (Geom.lineContainsPoint(p1.x, p1.y, p2.x, p2.y, p.x, p.y, tolerance)) {
-          return true;
-        }
+    }
+    if (attr().get(END_DECORATION) != null) {
+      BezierPath cp = getCappedPath(scaleDenominator);
+      Point2D.Double p1 = path.get(path.size() - 1, 0);
+      Point2D.Double p2 = cp.get(path.size() - 1, 0);
+      if (Geom.lineContainsPoint(p1.x, p1.y, p2.x, p2.y, p.x, p.y, tolerance)) {
+        return true;
       }
     }
     return false;
@@ -236,14 +241,15 @@ public class BezierFigure extends AbstractAttributedFigure {
         TransformHandleKit.addTransformHandles(this, handles);
         handles.add(new BezierScaleHandle(this));
         break;
+      default:
+        break;
     }
     return handles;
   }
 
   @Override
   public Rectangle2D.Double getBounds(double scale) {
-    Rectangle2D.Double bounds = path.getBounds2D();
-    return bounds;
+    return path.getBounds2D();
   }
 
   @Override
@@ -301,8 +307,8 @@ public class BezierFigure extends AbstractAttributedFigure {
     } else if (attribute == WINDING_RULE) {
       path.setWindingRule(
           newValue == AttributeKeys.WindingRule.EVEN_ODD
-              ? Path2D.Double.WIND_EVEN_ODD
-              : Path2D.Double.WIND_NON_ZERO);
+              ? Path2D.WIND_EVEN_ODD
+              : Path2D.WIND_NON_ZERO);
     }
     invalidate();
     super.fireAttributeChanged(attribute, oldValue, newValue);
@@ -342,47 +348,60 @@ public class BezierFigure extends AbstractAttributedFigure {
       cappedPathFactor = factor;
       if (isClosed()) {
         cappedPath.setClosed(true);
-      } else {
-        if (cappedPath.size() > 1) {
-          if (attr().get(START_DECORATION) != null) {
-            BezierPath.Node p0 = cappedPath.nodes().get(0);
-            BezierPath.Node p1 = cappedPath.nodes().get(1);
-            Point2D.Double pp;
-            if ((p0.getMask() & BezierPath.C2_MASK) != 0) {
-              pp = p0.getControlPoint(2);
-            } else if ((p1.getMask() & BezierPath.C1_MASK) != 0) {
-              pp = p1.getControlPoint(1);
-            } else {
-              pp = p1.getControlPoint(0);
-            }
-            double radius = attr().get(START_DECORATION).getDecorationRadius(this, factor);
-            double lineLength = Geom.length(p0.getControlPoint(0), pp);
-            cappedPath.set(
-                0, 0, Geom.cap(pp, p0.getControlPoint(0), -Math.min(radius, lineLength)));
-          }
-          if (attr().get(END_DECORATION) != null) {
-            BezierPath.Node p0 = cappedPath.nodes().get(cappedPath.size() - 1);
-            BezierPath.Node p1 = cappedPath.nodes().get(cappedPath.size() - 2);
-            Point2D.Double pp;
-            if ((p0.getMask() & BezierPath.C1_MASK) != 0) {
-              pp = p0.getControlPoint(1);
-            } else if ((p1.getMask() & BezierPath.C2_MASK) != 0) {
-              pp = p1.getControlPoint(2);
-            } else {
-              pp = p1.getControlPoint(0);
-            }
-            double radius = attr().get(END_DECORATION).getDecorationRadius(this, factor);
-            double lineLength = Geom.length(p0.getControlPoint(0), pp);
-            cappedPath.set(
-                cappedPath.size() - 1,
-                0,
-                Geom.cap(pp, p0.getControlPoint(0), -Math.min(radius, lineLength)));
-          }
-          cappedPath.invalidatePath();
-        }
+      } else if (cappedPath.size() > 1) {
+        applyStartCap(factor);
+        applyEndCap(factor);
+        cappedPath.invalidatePath();
       }
     }
     return cappedPath;
+  }
+
+  private void applyStartCap(double factor) {
+    if (attr().get(START_DECORATION) == null) {
+      return;
+    }
+    BezierPath.Node p0 = cappedPath.nodes().get(0);
+    BezierPath.Node p1 = cappedPath.nodes().get(1);
+    Point2D.Double pp = resolveStartControlPoint(p0, p1);
+    double radius = attr().get(START_DECORATION).getDecorationRadius(this, factor);
+    double lineLength = Geom.length(p0.getControlPoint(0), pp);
+    cappedPath.set(0, 0, Geom.cap(pp, p0.getControlPoint(0), -Math.min(radius, lineLength)));
+  }
+
+  private Point2D.Double resolveStartControlPoint(BezierPath.Node p0, BezierPath.Node p1) {
+    if ((p0.getMask() & BezierPath.C2_MASK) != 0) {
+      return p0.getControlPoint(2);
+    } else if ((p1.getMask() & BezierPath.C1_MASK) != 0) {
+      return p1.getControlPoint(1);
+    } else {
+      return p1.getControlPoint(0);
+    }
+  }
+
+  private void applyEndCap(double factor) {
+    if (attr().get(END_DECORATION) == null) {
+      return;
+    }
+    BezierPath.Node p0 = cappedPath.nodes().get(cappedPath.size() - 1);
+    BezierPath.Node p1 = cappedPath.nodes().get(cappedPath.size() - 2);
+    Point2D.Double pp = resolveEndControlPoint(p0, p1);
+    double radius = attr().get(END_DECORATION).getDecorationRadius(this, factor);
+    double lineLength = Geom.length(p0.getControlPoint(0), pp);
+    cappedPath.set(
+        cappedPath.size() - 1,
+        0,
+        Geom.cap(pp, p0.getControlPoint(0), -Math.min(radius, lineLength)));
+  }
+
+  private Point2D.Double resolveEndControlPoint(BezierPath.Node p0, BezierPath.Node p1) {
+    if ((p0.getMask() & BezierPath.C1_MASK) != 0) {
+      return p0.getControlPoint(1);
+    } else if ((p1.getMask() & BezierPath.C2_MASK) != 0) {
+      return p1.getControlPoint(2);
+    } else {
+      return p1.getControlPoint(0);
+    }
   }
 
   /** Adds a control point. */
@@ -478,7 +497,7 @@ public class BezierFigure extends AbstractAttributedFigure {
   }
 
   /**
-   * Finds a control point index. Returns -1 if no control point could be found. FIXME - Move this
+   * Finds a control point index. Returns -1 if no control point could be found.
    * to BezierPath
    */
   public int findNode(Point2D.Double p) {
@@ -552,6 +571,12 @@ public class BezierFigure extends AbstractAttributedFigure {
     return path.size();
   }
 
+  protected BezierFigure(BezierFigure source) {
+    this.path = source.path.clone();
+    invalidate();
+  }
+
+  @SuppressWarnings("java:S2975")
   @Override
   public BezierFigure clone() {
     BezierFigure that = (BezierFigure) super.clone();

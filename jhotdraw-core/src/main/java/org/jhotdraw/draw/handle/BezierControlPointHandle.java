@@ -24,7 +24,8 @@ import org.jhotdraw.utils.util.*;
 /** A {@link Handle} which allows to interactively change a control point of a bezier path. */
 public class BezierControlPointHandle extends AbstractHandle {
 
-  protected int index, controlPointIndex;
+  protected int index;
+  protected int controlPointIndex;
   private CompositeEdit edit;
   private Figure transformOwner;
   private BezierPath.Node oldNode;
@@ -73,6 +74,49 @@ public class BezierControlPointHandle extends AbstractHandle {
     return getBezierFigure().getNodeCount() > index ? getBezierFigure().getNode(index) : null;
   }
 
+  private record HandleDrawStyle(
+      Color fillColor,
+      Color strokeColor,
+      Stroke stroke1,
+      Color strokeColor1,
+      Stroke stroke2,
+      Color strokeColor2) {}
+
+  private HandleDrawStyle resolveHandleDrawStyle() {
+    if (getEditor().getTool().supportsHandleInteraction()) {
+      return new HandleDrawStyle(
+          getEditor()
+              .getHandleAttribute(HandleAttributeKeys.BEZIER_CONTROL_POINT_HANDLE_FILL_COLOR),
+          getEditor()
+              .getHandleAttribute(HandleAttributeKeys.BEZIER_CONTROL_POINT_HANDLE_STROKE_COLOR),
+          getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_STROKE_1),
+          getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_COLOR_1),
+          getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_STROKE_2),
+          getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_COLOR_2));
+    } else {
+      return new HandleDrawStyle(
+          getEditor()
+              .getHandleAttribute(
+                  HandleAttributeKeys.BEZIER_CONTROL_POINT_HANDLE_FILL_COLOR_DISABLED),
+          getEditor()
+              .getHandleAttribute(
+                  HandleAttributeKeys.BEZIER_CONTROL_POINT_HANDLE_STROKE_COLOR_DISABLED),
+          getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_STROKE_1_DISABLED),
+          getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_COLOR_1_DISABLED),
+          getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_STROKE_2_DISABLED),
+          getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_COLOR_2_DISABLED));
+    }
+  }
+
+  private void drawTangentLine(
+      Graphics2D g, Stroke stroke, Color color, Point2D.Double p0, Point2D.Double pc) {
+    if (stroke != null && color != null) {
+      g.setStroke(stroke);
+      g.setColor(color);
+      g.draw(new Line2D.Double(view.drawingToView(p0), view.drawingToView(pc)));
+    }
+  }
+
   /** Draws this handle. */
   @Override
   public void draw(Graphics2D g) {
@@ -86,53 +130,15 @@ public class BezierControlPointHandle extends AbstractHandle {
         tOwner.attr().get(TRANSFORM).transform(p0, p0);
         tOwner.attr().get(TRANSFORM).transform(pc, pc);
       }
-      Color handleFillColor;
-      Color handleStrokeColor;
-      Stroke stroke1;
-      Color strokeColor1;
-      Stroke stroke2;
-      Color strokeColor2;
-      if (getEditor().getTool().supportsHandleInteraction()) {
-        handleFillColor = getEditor()
-            .getHandleAttribute(HandleAttributeKeys.BEZIER_CONTROL_POINT_HANDLE_FILL_COLOR);
-        handleStrokeColor = getEditor()
-            .getHandleAttribute(HandleAttributeKeys.BEZIER_CONTROL_POINT_HANDLE_STROKE_COLOR);
-        stroke1 = getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_STROKE_1);
-        strokeColor1 = getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_COLOR_1);
-        stroke2 = getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_STROKE_2);
-        strokeColor2 = getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_COLOR_2);
-      } else {
-        handleFillColor = getEditor()
-            .getHandleAttribute(
-                HandleAttributeKeys.BEZIER_CONTROL_POINT_HANDLE_FILL_COLOR_DISABLED);
-        handleStrokeColor = getEditor()
-            .getHandleAttribute(
-                HandleAttributeKeys.BEZIER_CONTROL_POINT_HANDLE_STROKE_COLOR_DISABLED);
-        stroke1 =
-            getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_STROKE_1_DISABLED);
-        strokeColor1 =
-            getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_COLOR_1_DISABLED);
-        stroke2 =
-            getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_STROKE_2_DISABLED);
-        strokeColor2 =
-            getEditor().getHandleAttribute(HandleAttributeKeys.BEZIER_TANGENT_COLOR_2_DISABLED);
-      }
-      if (stroke1 != null && strokeColor1 != null) {
-        g.setStroke(stroke1);
-        g.setColor(strokeColor1);
-        g.draw(new Line2D.Double(view.drawingToView(p0), view.drawingToView(pc)));
-      }
-      if (stroke2 != null && strokeColor2 != null) {
-        g.setStroke(stroke2);
-        g.setColor(strokeColor2);
-        g.draw(new Line2D.Double(view.drawingToView(p0), view.drawingToView(pc)));
-      }
+      HandleDrawStyle style = resolveHandleDrawStyle();
+      drawTangentLine(g, style.stroke1(), style.strokeColor1(), p0, pc);
+      drawTangentLine(g, style.stroke2(), style.strokeColor2(), p0, pc);
       if (v.keepColinear
           && v.mask == BezierPath.C1C2_MASK
           && (index > 0 && index < f.getNodeCount() - 1 || f.isClosed())) {
-        drawCircle(g, handleStrokeColor, handleFillColor);
+        drawCircle(g, style.strokeColor(), style.fillColor());
       } else {
-        drawCircle(g, handleFillColor, handleStrokeColor);
+        drawCircle(g, style.fillColor(), style.strokeColor());
       }
     }
   }
@@ -140,7 +146,8 @@ public class BezierControlPointHandle extends AbstractHandle {
   @Override
   public void trackStart(Point anchor, int modifiersEx) {
     BezierFigure figure = getOwner();
-    view.getDrawing().fireUndoableEditHappened(edit = new CompositeEdit("Punkt verschieben"));
+    edit = new CompositeEdit("Punkt verschieben");
+    view.getDrawing().fireUndoableEditHappened(edit);
     oldNode = figure.getNode(index);
   }
 
@@ -276,17 +283,18 @@ public class BezierControlPointHandle extends AbstractHandle {
   @Override
   public void keyPressed(KeyEvent evt) {
     final BezierFigure f = getOwner();
-    BezierPath.Node oldNode = f.getNode(index);
+    BezierPath.Node pressedNode = f.getNode(index);
     switch (evt.getKeyCode()) {
       case KeyEvent.VK_UP:
         f.willChange();
         f.setPoint(
             index,
             controlPointIndex,
-            new Point2D.Double(oldNode.x[controlPointIndex], oldNode.y[controlPointIndex] - 1d));
+            new Point2D.Double(
+                pressedNode.x[controlPointIndex], pressedNode.y[controlPointIndex] - 1d));
         f.changed();
         view.getDrawing()
-            .fireUndoableEditHappened(new BezierNodeEdit(f, index, oldNode, f.getNode(index)));
+            .fireUndoableEditHappened(new BezierNodeEdit(f, index, pressedNode, f.getNode(index)));
         evt.consume();
         break;
       case KeyEvent.VK_DOWN:
@@ -294,10 +302,11 @@ public class BezierControlPointHandle extends AbstractHandle {
         f.setPoint(
             index,
             controlPointIndex,
-            new Point2D.Double(oldNode.x[controlPointIndex], oldNode.y[controlPointIndex] + 1d));
+            new Point2D.Double(
+                pressedNode.x[controlPointIndex], pressedNode.y[controlPointIndex] + 1d));
         f.changed();
         view.getDrawing()
-            .fireUndoableEditHappened(new BezierNodeEdit(f, index, oldNode, f.getNode(index)));
+            .fireUndoableEditHappened(new BezierNodeEdit(f, index, pressedNode, f.getNode(index)));
         evt.consume();
         break;
       case KeyEvent.VK_LEFT:
@@ -305,10 +314,11 @@ public class BezierControlPointHandle extends AbstractHandle {
         f.setPoint(
             index,
             controlPointIndex,
-            new Point2D.Double(oldNode.x[controlPointIndex] - 1d, oldNode.y[controlPointIndex]));
+            new Point2D.Double(
+                pressedNode.x[controlPointIndex] - 1d, pressedNode.y[controlPointIndex]));
         f.changed();
         view.getDrawing()
-            .fireUndoableEditHappened(new BezierNodeEdit(f, index, oldNode, f.getNode(index)));
+            .fireUndoableEditHappened(new BezierNodeEdit(f, index, pressedNode, f.getNode(index)));
         evt.consume();
         break;
       case KeyEvent.VK_RIGHT:
@@ -316,15 +326,17 @@ public class BezierControlPointHandle extends AbstractHandle {
         f.setPoint(
             index,
             controlPointIndex,
-            new Point2D.Double(oldNode.x[controlPointIndex] + 1d, oldNode.y[controlPointIndex]));
+            new Point2D.Double(
+                pressedNode.x[controlPointIndex] + 1d, pressedNode.y[controlPointIndex]));
         f.changed();
         view.getDrawing()
-            .fireUndoableEditHappened(new BezierNodeEdit(f, index, oldNode, f.getNode(index)));
+            .fireUndoableEditHappened(new BezierNodeEdit(f, index, pressedNode, f.getNode(index)));
         evt.consume();
         break;
-      case KeyEvent.VK_DELETE:
-      case KeyEvent.VK_BACK_SPACE:
+      case KeyEvent.VK_DELETE, KeyEvent.VK_BACK_SPACE:
         evt.consume();
+        break;
+      default:
         break;
     }
   }
