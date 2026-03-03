@@ -1,10 +1,3 @@
-/*
- * @(#)GridConstrainer.java
- *
- * Copyright (c) 1996-2010 The authors and contributors of JHotDraw.
- * You may not use, copy or modify this file, except in compliance with the
- * accompanying license terms.
- */
 package org.jhotdraw.draw.constrainer;
 
 import java.awt.*;
@@ -48,6 +41,10 @@ public class GridConstrainer extends AbstractConstrainer {
   /** The spacing factor for a major grid cell. */
   private int majorGridSpacing = 5;
 
+  private static final double DEFAULT_ROTATION_THETA = Math.PI / 8d;
+
+  private static final double MIN_GRID_SPACING_PIXELS = 2d;
+
   /** Creates a new instance with a grid of 1x1. */
   public GridConstrainer() {
     this(1d, 1d, 0d, false);
@@ -61,7 +58,7 @@ public class GridConstrainer extends AbstractConstrainer {
    * @param height The height of a grid cell.
    */
   public GridConstrainer(double width, double height) {
-    this(width, height, Math.PI / 8d, true);
+    this(width, height, DEFAULT_ROTATION_THETA, true);
   }
 
   /**
@@ -72,7 +69,7 @@ public class GridConstrainer extends AbstractConstrainer {
    * @param visible Wether the grid is visible or not.
    */
   public GridConstrainer(double width, double height, boolean visible) {
-    this(width, height, Math.PI / 8d, visible);
+    this(width, height, DEFAULT_ROTATION_THETA, visible);
   }
 
   /**
@@ -106,19 +103,16 @@ public class GridConstrainer extends AbstractConstrainer {
   }
 
   public void setWidth(double newValue) {
-    double oldValue = width;
     width = newValue;
     fireStateChanged();
   }
 
   public void setHeight(double newValue) {
-    double oldValue = height;
     height = newValue;
     fireStateChanged();
   }
 
   public void setTheta(double newValue) {
-    double oldValue = theta;
     theta = newValue;
     fireStateChanged();
   }
@@ -126,6 +120,8 @@ public class GridConstrainer extends AbstractConstrainer {
   /** Constrains a point to the closest grid point in any direction. */
   @Override
   public Point2D.Double constrainPoint(Point2D.Double p, Figure... figure) {
+    assert width > 0 : "grid width must be positive";
+    assert height > 0 : "grid height must be positive";
     p.x = Math.round(p.x / width) * width;
     p.y = Math.round(p.y / height) * height;
     return p;
@@ -330,7 +326,6 @@ public class GridConstrainer extends AbstractConstrainer {
   }
 
   public void setVisible(boolean newValue) {
-    boolean oldValue = isVisible;
     isVisible = newValue;
     fireStateChanged();
   }
@@ -342,74 +337,59 @@ public class GridConstrainer extends AbstractConstrainer {
 
   /** Spacing between major grid lines. */
   public void setMajorGridSpacing(int newValue) {
-    int oldValue = majorGridSpacing;
     majorGridSpacing = newValue;
     fireStateChanged();
   }
 
   @Override
   public void draw(Graphics2D g, DrawingView view) {
-    if (isVisible) {
-      AffineTransform t = view.getDrawingToViewTransform();
-      Rectangle viewBounds = g.getClipBounds();
-      Rectangle2D.Double bounds = view.viewToDrawing(viewBounds);
-      Point2D.Double origin = constrainPoint(new Point2D.Double(bounds.x, bounds.y));
-      Point2D.Double point = new Point2D.Double();
-      Point2D.Double viewPoint = new Point2D.Double();
-      // vertical grid lines are only drawn, if they are at least two
-      // pixels apart on the view coordinate system.
-      if (width * view.getScaleFactor() > 2) {
-        g.setColor(minorColor);
-        for (int i = (int) (origin.x / width), m = (int) ((origin.x + bounds.width) / width) + 1;
-            i <= m;
-            i++) {
-          g.setColor((i % majorGridSpacing == 0) ? majorColor : minorColor);
-          point.x = width * i;
-          t.transform(point, viewPoint);
-          g.drawLine(
-              (int) viewPoint.x, viewBounds.y, (int) viewPoint.x, viewBounds.y + viewBounds.height);
-        }
-      } else if (width * majorGridSpacing * view.getScaleFactor() > 2) {
-        g.setColor(majorColor);
-        for (int i = (int) (origin.x / width), m = (int) ((origin.x + bounds.width) / width) + 1;
-            i <= m;
-            i++) {
-          if (i % majorGridSpacing == 0) {
-            point.x = width * i;
-            t.transform(point, viewPoint);
-            g.drawLine(
-                (int) viewPoint.x,
-                viewBounds.y,
-                (int) viewPoint.x,
-                viewBounds.y + viewBounds.height);
-          }
-        }
+    if (!isVisible) {
+      return;
+    }
+    AffineTransform t = view.getDrawingToViewTransform();
+    Rectangle viewBounds = g.getClipBounds();
+    Rectangle2D.Double bounds = view.viewToDrawing(viewBounds);
+    Point2D.Double origin = constrainPoint(new Point2D.Double(bounds.x, bounds.y));
+    double scaleFactor = view.getScaleFactor();
+    drawAxisLines(g, t, viewBounds, width, scaleFactor, origin.x, bounds.width, true);
+    drawAxisLines(g, t, viewBounds, height, scaleFactor, origin.y, bounds.height, false);
+  }
+
+  private void drawAxisLines(
+      Graphics2D g,
+      AffineTransform t,
+      Rectangle viewBounds,
+      double cellSize,
+      double scaleFactor,
+      double originCoord,
+      double boundsExtent,
+      boolean vertical) {
+    boolean drawMinor = cellSize * scaleFactor > MIN_GRID_SPACING_PIXELS;
+    boolean drawMajorOnly =
+        !drawMinor && cellSize * majorGridSpacing * scaleFactor > MIN_GRID_SPACING_PIXELS;
+    if (!drawMinor && !drawMajorOnly) {
+      return;
+    }
+    Point2D.Double point = new Point2D.Double();
+    Point2D.Double viewPoint = new Point2D.Double();
+    int start = (int) (originCoord / cellSize);
+    int end = (int) ((originCoord + boundsExtent) / cellSize) + 1;
+    for (int i = start; i <= end; i++) {
+      boolean major = i % majorGridSpacing == 0;
+      if (drawMajorOnly && !major) {
+        continue;
       }
-      // horizontal grid lines are only drawn, if they are at least two
-      // pixels apart on the view coordinate system.
-      if (height * view.getScaleFactor() > 2) {
-        g.setColor(minorColor);
-        for (int i = (int) (origin.y / height), m = (int) ((origin.y + bounds.height) / height) + 1;
-            i <= m;
-            i++) {
-          g.setColor((i % majorGridSpacing == 0) ? majorColor : minorColor);
-          point.y = height * i;
-          t.transform(point, viewPoint);
-          g.drawLine(
-              viewBounds.x, (int) viewPoint.y, viewBounds.x + viewBounds.width, (int) viewPoint.y);
-        }
-      } else if (height * majorGridSpacing * view.getScaleFactor() > 2) {
-        g.setColor(majorColor);
-        for (int i = (int) (origin.y / height), m = (int) ((origin.y + bounds.height) / height) + 1;
-            i <= m;
-            i++) {
-          if (i % majorGridSpacing == 0) {
-            point.y = height * i;
-            t.transform(point, viewPoint);
-            g.drawLine(viewBounds.x, (int) viewPoint.y, viewBounds.x + viewBounds.width, (int)
-                viewPoint.y);
-          }
-        }
+      g.setColor(major ? majorColor : minorColor);
+      if (vertical) {
+        point.x = cellSize * i;
+        t.transform(point, viewPoint);
+        g.drawLine(
+            (int) viewPoint.x, viewBounds.y, (int) viewPoint.x, viewBounds.y + viewBounds.height);
+      } else {
+        point.y = cellSize * i;
+        t.transform(point, viewPoint);
+        g.drawLine(
+            viewBounds.x, (int) viewPoint.y, viewBounds.x + viewBounds.width, (int) viewPoint.y);
       }
     }
   }
