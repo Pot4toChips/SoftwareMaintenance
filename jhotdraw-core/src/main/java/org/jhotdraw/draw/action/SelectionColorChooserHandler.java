@@ -24,8 +24,6 @@ public class SelectionColorChooserHandler extends AbstractSelectedAction impleme
   protected JPopupMenu popupMenu;
   protected int isUpdating;
 
-  // protected Map<AttributeKey, Object> attributes;
-
   public SelectionColorChooserHandler(
       DrawingEditor editor,
       AttributeKey<Color> key,
@@ -35,52 +33,59 @@ public class SelectionColorChooserHandler extends AbstractSelectedAction impleme
     this.key = key;
     this.colorChooser = colorChooser;
     this.popupMenu = popupMenu;
-    // colorChooser.addActionListener(this);
     colorChooser.getSelectionModel().addChangeListener(this);
     updateEnabledState();
   }
 
   @Override
   public void actionPerformed(java.awt.event.ActionEvent evt) {
-    /*
-    if (evt.getActionCommand() == JColorChooser.APPROVE_SELECTION) {
-        applySelectedColorToFigures();
-    } else if (evt.getActionCommand() == JColorChooser.CANCEL_SELECTION) {
-    }*/
     popupMenu.setVisible(false);
   }
 
   protected void applySelectedColorToFigures() {
-    final ArrayList<Figure> selectedFigures = new ArrayList<>(getView().getSelectedFigures());
+    final ArrayList<Figure> selectedFigures = getSelectedFigures();
+    final ArrayList<Object> restoreData = collectRestoreData(selectedFigures);
+    Color selectedColor = getSelectedColor();
+    applyColorToFigures(selectedFigures, selectedColor);
+    getEditor().setDefaultAttribute(key, selectedColor);
+    fireUndoableEditHappened(createColorChangeEdit(selectedFigures, restoreData, selectedColor));
+  }
+
+  private ArrayList<Figure> getSelectedFigures() {
+    return new ArrayList<>(getView().getSelectedFigures());
+  }
+
+  private ArrayList<Object> collectRestoreData(ArrayList<Figure> selectedFigures) {
     final ArrayList<Object> restoreData = new ArrayList<>(selectedFigures.size());
-    Color selectedColor = colorChooser.getColor();
-    if (selectedColor != null && selectedColor.getAlpha() == 0) {
-      selectedColor = null;
-    }
     for (Figure figure : selectedFigures) {
       restoreData.add(figure.attr().getAttributesRestoreData());
+    }
+    return restoreData;
+  }
+
+  private Color getSelectedColor() {
+    Color selectedColor = colorChooser.getColor();
+    return selectedColor != null && selectedColor.getAlpha() == 0 ? null : selectedColor;
+  }
+
+  private void applyColorToFigures(ArrayList<Figure> selectedFigures, Color selectedColor) {
+    for (Figure figure : selectedFigures) {
       figure.willChange();
       figure.attr().set(key, selectedColor);
       figure.changed();
     }
-    getEditor().setDefaultAttribute(key, selectedColor);
-    final Color undoValue = selectedColor;
+  }
+
+  private UndoableEdit createColorChangeEdit(
+      final ArrayList<Figure> selectedFigures,
+      final ArrayList<Object> restoreData,
+      final Color undoValue) {
     UndoableEdit edit = new AbstractUndoableEdit() {
       private static final long serialVersionUID = 1L;
 
       @Override
       public String getPresentationName() {
         return AttributeKeys.FONT_FACE.getPresentationName();
-        /*
-        String name = (String) getValue(Actions.UNDO_PRESENTATION_NAME_KEY);
-        if (name == null) {
-        name = (String) getValue(AbstractAction.NAME);
-        }
-        if (name == null) {
-        ResourceBundleUtil labels = ResourceBundleUtil.getBundle("org.jhotdraw.draw.Labels");
-        name = labels.getString("attribute.text");
-        }
-        return name;*/
       }
 
       @Override
@@ -97,15 +102,10 @@ public class SelectionColorChooserHandler extends AbstractSelectedAction impleme
       @Override
       public void redo() {
         super.redo();
-        for (Figure figure : selectedFigures) {
-          // restoreData.add(figure.getAttributesRestoreData());
-          figure.willChange();
-          figure.attr().set(key, undoValue);
-          figure.changed();
-        }
+        applyColorToFigures(selectedFigures, undoValue);
       }
     };
-    fireUndoableEditHappened(edit);
+    return edit;
   }
 
   @Override
@@ -115,7 +115,7 @@ public class SelectionColorChooserHandler extends AbstractSelectedAction impleme
       colorChooser.setEnabled(getView().getSelectionCount() > 0);
       popupMenu.setEnabled(getView().getSelectionCount() > 0);
       isUpdating++;
-      if (getView().getSelectionCount() > 0 /*&& colorChooser.isShowing()*/) {
+      if (getView().getSelectionCount() > 0) {
         for (Figure f : getView().getSelectedFigures()) {
           Color figureColor = f.attr().get(key);
           colorChooser.setColor(figureColor == null ? new Color(0, true) : figureColor);
