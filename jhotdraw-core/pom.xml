@@ -46,6 +46,11 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <groupId>com.tngtech.jgiven</groupId>
+      <artifactId>jgiven-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>${project.groupId}</groupId>
       <artifactId>jhotdraw-datatransfer</artifactId>
       <version>${project.version}</version>
